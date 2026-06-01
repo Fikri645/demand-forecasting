@@ -4,11 +4,11 @@ Load and prepare M5 (Walmart) time series data.
 The M5 competition dataset (2020) covers:
   - 3049 product/store combinations across 10 US states
   - Daily unit sales from 2011-01-29 to 2016-06-19 (1941 days)
-  - 3 levels: item → department/category → state/store
+  - 3 levels: item -> department/category -> state/store
 
 For this portfolio project we use a representative subset:
-  - 3 stores (CA_1, TX_1, WI_1) × 3 categories (FOODS, HOBBIES, HOUSEHOLD)
-  - Result: ~270 series, each with 1941 observations
+  - 3 stores (CA_1, TX_1, WI_1), 100 series each = 300 series total
+  - Full M5 has 30,490 series; 300 is enough for model comparison and demo
 
 External features available:
   - sell_price: item price on that day
@@ -24,12 +24,11 @@ from pathlib import Path
 from src.config import (
     DATA_PROC, TRAIN_PARQUET, TEST_PARQUET,
     TARGET_COL, DATE_COL, ID_COL,
-    N_STORES, HORIZON, VAL_SIZE, RANDOM_SEED,
+    N_SERIES, HORIZON, VAL_SIZE, RANDOM_SEED,
 )
 
-# Stores and categories we include in the portfolio subset
-STORES      = ["CA_1", "TX_1", "WI_1"]
-CATEGORIES  = ["FOODS", "HOBBIES", "HOUSEHOLD"]
+# We sample N_SERIES // len(STORES) series per store for diversity
+STORES = ["CA_1", "TX_1", "WI_1"]
 
 
 def load_m5(force_reload: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -61,14 +60,19 @@ def load_m5(force_reload: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
           f"{len(Y_df):,} rows")
 
     # ── Filter to portfolio subset ─────────────────────────────────────────
-    # M5 unique_id format: FOODS_1_001_CA_1_validation
-    # We keep series whose unique_id contains our target stores AND categories
-    mask = (
-        Y_df[ID_COL].str.contains("|".join(STORES)) &
-        Y_df[ID_COL].str.contains("|".join(CATEGORIES))
-    )
-    Y_sub = Y_df[mask].copy()
-    print(f"  Portfolio subset: {Y_sub[ID_COL].nunique():,} series")
+    # M5 unique_id ends with store name, e.g. FOODS_1_001_CA_1
+    # Filter per store, then sample N_SERIES // len(STORES) series each.
+    per_store = N_SERIES // len(STORES)
+    sampled_ids = []
+    rng = np.random.default_rng(RANDOM_SEED)
+    for store in STORES:
+        store_ids = Y_df[Y_df[ID_COL].str.endswith(f"_{store}")][ID_COL].unique()
+        n = min(per_store, len(store_ids))
+        sampled_ids.extend(rng.choice(store_ids, size=n, replace=False).tolist())
+
+    Y_sub = Y_df[Y_df[ID_COL].isin(sampled_ids)].copy()
+    print(f"  Portfolio subset: {Y_sub[ID_COL].nunique():,} series "
+          f"({per_store} per store x {len(STORES)} stores)")
 
     # ── Merge exogenous features ───────────────────────────────────────────
     if X_df is not None:
@@ -85,22 +89,22 @@ def load_m5(force_reload: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     df[TARGET_COL] = df[TARGET_COL].fillna(0).clip(lower=0)
 
     # ── Coarsen IDs for readability ────────────────────────────────────────
-    # e.g. "FOODS_1_001_CA_1_validation" → keep as-is (already meaningful)
+    # e.g. "FOODS_1_001_CA_1_validation" -> keep as-is (already meaningful)
 
     # ── Train / test split (last HORIZON days as test) ────────────────────
     cutoff = df[DATE_COL].max() - pd.Timedelta(days=HORIZON)
     train  = df[df[DATE_COL] <= cutoff].copy()
     test   = df[df[DATE_COL] >  cutoff].copy()
 
-    print(f"  Train: {train[DATE_COL].min().date()} → {train[DATE_COL].max().date()} "
+    print(f"  Train: {train[DATE_COL].min().date()} -> {train[DATE_COL].max().date()} "
           f"({len(train):,} rows)")
-    print(f"  Test : {test[DATE_COL].min().date()}  → {test[DATE_COL].max().date()} "
+    print(f"  Test : {test[DATE_COL].min().date()}  -> {test[DATE_COL].max().date()} "
           f"({len(test):,} rows)")
 
     # ── Save ───────────────────────────────────────────────────────────────
     train.to_parquet(TRAIN_PARQUET, index=False)
     test.to_parquet(TEST_PARQUET, index=False)
-    print(f"  Saved → {TRAIN_PARQUET.parent}")
+    print(f"  Saved -> {TRAIN_PARQUET.parent}")
 
     return train, test
 

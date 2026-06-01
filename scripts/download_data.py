@@ -16,4 +16,4 @@ if __name__ == "__main__":
     print(f"\nDone!")
     print(f"  Train: {len(train):,} rows, {train['unique_id'].nunique()} series")
     print(f"  Test : {len(test):,} rows")
-    print(f"  Date range: {train['ds'].min().date()} → {test['ds'].max().date()}")
+    print(f"  Date range: {train['ds'].min().date()} -> {test['ds'].max().date()}")

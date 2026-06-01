@@ -118,7 +118,7 @@ def save(fcst: MLForecast) -> None:
     MODELS_DIR.mkdir(exist_ok=True)
     with open(LGBM_MODEL_PATH, "wb") as f:
         pickle.dump(fcst, f)
-    print(f"  Saved LightGBM → {LGBM_MODEL_PATH}")
+    print(f"  Saved LightGBM -> {LGBM_MODEL_PATH}")
 
 
 def load() -> MLForecast:

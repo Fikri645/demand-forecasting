@@ -18,8 +18,9 @@ TEST_PARQUET  = DATA_PROC / "test.parquet"
 # M5 competition (Walmart sales) loaded via datasetsforecast
 # 42,840 series × 1941 daily obs. We use a representative subset.
 DATASET_NAME  = "m5"
-N_STORES      = 3       # CA_1, TX_1, WI_1  — manageable for portfolio
-N_CATEGORIES  = 3       # FOODS, HOBBIES, HOUSEHOLD
+# We cap the portfolio subset at N_SERIES series (100 per store × 3 stores).
+# Full M5 has 30,490 series — too large for a portfolio demo.
+N_SERIES      = 300     # total series cap (evenly distributed across stores)
 TARGET_COL    = "y"
 DATE_COL      = "ds"
 ID_COL        = "unique_id"

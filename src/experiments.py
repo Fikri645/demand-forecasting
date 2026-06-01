@@ -267,7 +267,7 @@ def run_all() -> dict:
     # Save metadata
     best_model = summary["rmsle"].idxmin()
     best_rmsle = float(summary.loc[best_model, "rmsle"])
-    print(f"\n  → Best model: {best_model}  (RMSLE={best_rmsle:.4f})")
+    print(f"\n  >> Best model: {best_model}  (RMSLE={best_rmsle:.4f})")
 
     MODELS_DIR.mkdir(exist_ok=True)
     meta = {
