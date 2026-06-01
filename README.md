@@ -43,12 +43,12 @@ End-to-end retail demand forecasting pipeline. Compares **5 approaches** from na
 ## Architecture
 
 ```
-M5 Dataset (datasetsforecast)
-  └─► data_loader.py    (load, filter, train/test split)
-        └─► features.py  (lag, rolling, calendar, price features)
+Store Sales CSV (Kaggle) / M5 fallback (datasetsforecast)
+  └─► data_loader.py    (load, fill date gaps, train/test split)
+        └─► features.py  (lag, rolling, calendar, oil price, holiday features)
               ├─► train_lgbm.py    (LightGBM via mlforecast + MLflow)
-              ├─► train_chronos.py (Chronos-2 zero-shot — no training)
-              └─► experiments.py   (5-model comparison → model_meta.json)
+              ├─► train_chronos.py (Chronos-2 zero-shot — no training, requires GPU)
+              └─► experiments.py   (5-model comparison -> model_meta.json)
                     └─► evaluate.py (forecast plots, metrics comparison)
                           ├─► api/main.py       (FastAPI /forecast)
                           └─► app/gradio_app.py (HF Spaces UI)
@@ -64,7 +64,11 @@ git clone https://github.com/Fikri645/demand-forecasting
 cd demand-forecasting
 pip install -r requirements-dev.txt
 
-# 2. Download M5 dataset (automatic, no Kaggle needed)
+# 2a. (Option A) Download Store Sales from Kaggle — put zip in data/raw/ then:
+python scripts/download_data.py
+
+# 2b. (Option B) Auto-download M5 via datasetsforecast (no Kaggle needed)
+#     Just run the script — it will use M5 as fallback automatically
 python scripts/download_data.py
 
 # 3. Run full experiment (5 models + MLflow logging)
@@ -142,12 +146,14 @@ Forecast = same weekday last week. Any real model must beat this.
 - **External**: oil price, promotion flag, holiday flag (Store Sales specific)
 
 ### Amazon Chronos-2 (2025 SOTA)
-Zero-shot foundation model — no training data needed. Loads pre-trained weights (`amazon/chronos-t5-small`, 250M params) from HuggingFace. Generates 100 probabilistic samples → P10/P50/P90 quantiles.
+Zero-shot foundation model — no training data needed. Loads pre-trained weights (`amazon/chronos-t5-small`, 250M params) from HuggingFace. Generates 100 probabilistic samples -> P10/P50/P90 quantiles.
 
 > Chronos-2 (Oct 2025) natively supports cross-series dependencies, exogenous features, and multivariate forecasting. Zero-shot performance competitive with fully-supervised models.
 
+**Requirements:** Chronos needs PyTorch with CUDA and sufficient virtual memory (page file >= 8GB on Windows). Run `python -m src.train_chronos` after increasing virtual memory. Code is complete and ready.
+
 ### Ensemble
-Weighted average: LightGBM × 0.6 + Chronos × 0.4. Combines domain-feature awareness with temporal pattern recognition.
+Weighted average: LightGBM x 0.6 + Chronos x 0.4. Combines domain-feature awareness with temporal pattern recognition. Run `python -m src.experiments` after Chronos is available.
 
 ---
 
