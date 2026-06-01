@@ -28,7 +28,7 @@ End-to-end retail demand forecasting pipeline. Compares **5 approaches** from na
 
 | What | Detail |
 |---|---|
-| **Dataset** | M5 Competition (Walmart) — 42,840 series, 1,941 days daily sales |
+| **Dataset** | Store Sales (Corporación Favorita) — 54 stores, 33 families, 4.5 years + oil price + holidays |
 | **Models** | Seasonal Naive → AutoARIMA → LightGBM → Amazon Chronos-2 → Ensemble |
 | **2025 SOTA** | Amazon **Chronos-2** (Oct 2025) — zero-shot, no retraining needed |
 | **Prediction intervals** | 80% + 90% bands via conformal prediction |
@@ -94,7 +94,7 @@ demand-forecasting/
 ├── data/processed/         # train.parquet, test.parquet
 ├── src/
 │   ├── config.py           # paths, constants
-│   ├── data_loader.py      # M5 dataset loading + preprocessing
+│   ├── data_loader.py      # Store Sales (Favorita) loading + gap fill + M5 fallback
 │   ├── features.py         # lag, rolling, calendar feature engineering
 │   ├── metrics.py          # RMSE, MAE, RMSLE, MASE, coverage
 │   ├── train_lgbm.py       # LightGBM via mlforecast
@@ -111,15 +111,17 @@ demand-forecasting/
 
 ---
 
-## Dataset — M5 (Walmart)
+## Dataset — Store Sales (Corporacion Favorita)
 
-The **M5 Forecasting Competition** (Kaggle 2020) is the gold-standard retail benchmark:
-- 42,840 daily sales series across 10 US states
-- 3 categories: FOODS, HOBBIES, HOUSEHOLD
-- External features: sell price, US holidays, SNAP food-stamp days
-- Portfolio uses 3 stores × 3 categories (~270 series)
+The **Store Sales - Time Series Forecasting** competition (Kaggle) uses real data from Ecuador's largest grocery chain:
+- **54 stores**, 33 product families, daily unit sales
+- **4.5 years**: 2013-01-01 to 2017-08-15 (1,684 days)
+- External features: **oil price** (Ecuador is oil-dependent — economic shocks affect spending), **national/regional holidays**, **promotions**
+- Portfolio uses top 300 series by total volume
 
-Dataset loaded via `datasetsforecast` — no Kaggle credentials required.
+Source: [Kaggle Store Sales Competition](https://www.kaggle.com/competitions/store-sales-time-series-forecasting)
+
+> M5 (Walmart, via `datasetsforecast`) available as automatic fallback if CSV not present.
 
 ---
 
@@ -137,7 +139,7 @@ Forecast = same weekday last week. Any real model must beat this.
 - **Rolling**: 7-day and 28-day mean, std, max per series
 - **Calendar**: day-of-week, month, quarter, is-weekend, month-start/end
 - **Price**: normalised sell price, price change %
-- **Events**: holiday and SNAP flags
+- **External**: oil price, promotion flag, holiday flag (Store Sales specific)
 
 ### Amazon Chronos-2 (2025 SOTA)
 Zero-shot foundation model — no training data needed. Loads pre-trained weights (`amazon/chronos-t5-small`, 250M params) from HuggingFace. Generates 100 probabilistic samples → P10/P50/P90 quantiles.

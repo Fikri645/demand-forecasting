@@ -86,11 +86,10 @@ def run_statistical(train_df: pd.DataFrame,
     # statsforecast expects (unique_id, ds, y) long format
     sf = StatsForecast(
         models=[
-            AutoARIMA(season_length=7),
-            AutoETS(season_length=7),
+            AutoARIMA(season_length=7, approximation=True),  # approximation=True = faster
         ],
         freq=FREQ,
-        n_jobs=-1,
+        n_jobs=1,   # n_jobs=-1 causes paging-file OOM on Windows with many workers
     )
 
     sf.fit(train_df[[ID_COL, DATE_COL, TARGET_COL]])
