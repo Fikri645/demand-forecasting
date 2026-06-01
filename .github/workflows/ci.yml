@@ -21,4 +21,4 @@ jobs:
         run: ruff check src/ tests/ api/ app/ --ignore E501
         continue-on-error: true
       - name: Run tests
-        run: pytest tests/ -v --tb=short
+        run: pytest tests/ -v --tb=short --cov=src --cov=api --cov-report=term-missing

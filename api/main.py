@@ -4,8 +4,8 @@ FastAPI serving layer for demand forecasting.
 Endpoints:
   GET  /              — health check
   GET  /series        — list available series IDs
-  POST /forecast      — single-series forecast
-  POST /forecast/batch — multi-series forecast (CSV upload)
+  POST /forecast      — single-series 28-day forecast
+  POST /forecast/batch — multi-series batch forecast (up to 50 series)
 
 Usage:
     uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
@@ -23,9 +23,10 @@ from fastapi.responses import JSONResponse
 
 from api.schemas import (
     ForecastRequest, ForecastResponse, DayForecast, HealthResponse,
+    BatchForecastRequest, BatchForecastResponse,
 )
 from src.config import (
-    LGBM_MODEL_PATH, MODEL_META_PATH, TRAIN_PARQUET,
+    LGBM_MODEL_PATH, LGBM_TUNED_PATH, MODEL_META_PATH, TRAIN_PARQUET,
     HORIZON, ID_COL, DATE_COL, TARGET_COL,
 )
 
@@ -44,8 +45,10 @@ _meta       = {}
 
 def _load_artifacts():
     global _lgbm_model, _train_df, _meta
-    if LGBM_MODEL_PATH.exists():
-        with open(LGBM_MODEL_PATH, "rb") as f:
+    # Prefer Optuna-tuned model if available; fall back to default
+    model_path = LGBM_TUNED_PATH if LGBM_TUNED_PATH.exists() else LGBM_MODEL_PATH
+    if model_path.exists():
+        with open(model_path, "rb") as f:
             _lgbm_model = pickle.load(f)
     if TRAIN_PARQUET.exists():
         _train_df = pd.read_parquet(TRAIN_PARQUET)
@@ -129,3 +132,20 @@ def forecast(req: ForecastRequest):
             "Chronos endpoint not available in this deployment "
             "(requires GPU). Use model='lightgbm' instead."
         )
+
+
+@app.post("/forecast/batch", response_model=BatchForecastResponse)
+def forecast_batch(req: BatchForecastRequest):
+    """Generate demand forecasts for multiple series in one request (max 50)."""
+    results = []
+    skipped = []
+    for series_id in req.series_ids:
+        try:
+            preds = _run_lgbm(series_id, req.horizon)
+            results.append(_forecast_to_response(series_id, req.model, preds))
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                skipped.append(series_id)
+            else:
+                raise
+    return BatchForecastResponse(forecasts=results, count=len(results), skipped=skipped)

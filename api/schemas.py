@@ -48,6 +48,32 @@ class ForecastResponse(BaseModel):
     }}}
 
 
+class BatchForecastRequest(BaseModel):
+    """Request body for /forecast/batch endpoint."""
+
+    series_ids : list[str] = Field(..., min_length=1, max_length=50,
+                                   description="List of series IDs to forecast (max 50)")
+    horizon    : int = Field(default=28, ge=1, le=90,
+                              description="Forecast horizon in days (1–90)")
+    model      : Literal["lightgbm", "ensemble"] = Field(
+        default="ensemble",
+        description="Which model to use for all series in the batch",
+    )
+
+    model_config = {"json_schema_extra": {"example": {
+        "series_ids": ["store_1_GROCERY I", "store_1_BEVERAGES"],
+        "horizon"   : 28,
+        "model"     : "ensemble",
+    }}}
+
+
+class BatchForecastResponse(BaseModel):
+    forecasts : list[ForecastResponse]
+    count     : int
+    skipped   : list[str] = Field(default_factory=list,
+                                   description="Series IDs not found in training data")
+
+
 class HealthResponse(BaseModel):
     status  : Literal["ok"]
     model   : str
