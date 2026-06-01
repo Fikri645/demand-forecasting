@@ -67,10 +67,11 @@ class ChronosFineTuneDataset(Dataset):
     Sliding-window dataset for Chronos fine-tuning.
 
     Each sample = (context_ids, target_ids) where:
-      - context_ids: tokenized past CONTEXT_LENGTH observations
-      - target_ids:  tokenized next HORIZON observations
+      - context_ids: tokenized past context_length observations
+      - target_ids:  tokenized next train_horizon observations
 
-    We slide the window by HORIZON steps across each series.
+    IMPORTANT: train_horizon must match tokenizer.config.prediction_length (64 for
+    chronos-t5-small). We use 64-step targets for training, then trim to 28 at eval.
     """
 
     def __init__(
@@ -80,19 +81,21 @@ class ChronosFineTuneDataset(Dataset):
         context_length: int = CONTEXT_LENGTH,
         horizon: int = HORIZON,
     ):
-        self.samples = []
+        self.samples   = []
         self.tokenizer = tokenizer
+        # Use model's native prediction_length for training targets
+        train_horizon  = tokenizer.config.prediction_length  # 64 for chronos-t5-small
 
         for uid, grp in df.groupby(ID_COL, observed=True):
             values = grp.sort_values(DATE_COL)[TARGET_COL].values.astype(np.float32)
             n = len(values)
 
-            # Sliding windows — step = horizon to avoid excessive overlap
-            step = horizon
-            for start in range(0, n - context_length - horizon + 1, step):
+            # Sliding windows — step = train_horizon to avoid excessive overlap
+            step = train_horizon
+            for start in range(0, n - context_length - train_horizon + 1, step):
                 ctx_slice = values[start: start + context_length]
                 tgt_slice = values[start + context_length:
-                                   start + context_length + horizon]
+                                   start + context_length + train_horizon]
                 self.samples.append((ctx_slice, tgt_slice))
 
         print(f"  Fine-tune dataset: {len(self.samples):,} windows "
