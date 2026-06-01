@@ -87,7 +87,7 @@ def evaluate_forecasts(
     )
 
     rows = []
-    for uid, grp in merged.groupby(id_col):
+    for uid, grp in merged.groupby(id_col, observed=True):
         y_t = grp[target_col].values
         y_p = grp[pred_col].values
         y_train_series = train[train[id_col] == uid][target_col].values
@@ -117,7 +117,7 @@ def evaluate_forecasts(
 
 
 def print_metrics_table(df_metrics: pd.DataFrame, model_name: str = "") -> None:
-    header = f"{'─'*55}\n  Metrics: {model_name}\n{'─'*55}"
+    header = f"{'-'*55}\n  Metrics: {model_name}\n{'-'*55}"
     print(header)
     agg = df_metrics[df_metrics["unique_id"] == "ALL (mean)"]
     for col in ["rmse", "mae", "rmsle", "smape", "mase"]:

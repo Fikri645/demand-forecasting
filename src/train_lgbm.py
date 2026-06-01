@@ -80,21 +80,29 @@ def train(train_df: pd.DataFrame, val_df: pd.DataFrame,
     with (mlflow.start_run(run_name="LightGBM") if mlflow_run
           else __import__("contextlib").nullcontext()):
 
-        fcst.fit(train_df, id_col=ID_COL, time_col=DATE_COL, target_col=TARGET_COL)
+        # Keep only the columns mlforecast needs — extra exog columns (event_name_1,
+        # snap_CA, etc.) are handled via lag/date features, not passed directly.
+        train_core = train_df[[ID_COL, DATE_COL, TARGET_COL]].copy()
 
-        # Predict with prediction intervals (conformal, level=[80, 90])
-        preds = fcst.predict(
-            h=HORIZON,
+        # PredictionIntervals must be passed to fit(), then level= to predict()
+        fcst.fit(
+            train_core,
+            id_col=ID_COL, time_col=DATE_COL, target_col=TARGET_COL,
+            static_features=[],
             prediction_intervals=PredictionIntervals(n_windows=3, h=HORIZON),
-            level=[80, 90],
         )
 
+        preds = fcst.predict(h=HORIZON, level=[80, 90])
+
         # Rename prediction columns to standard names
-        preds = preds.rename(columns={
-            "LightGBM": "y_pred",
-            "LightGBM-lo-80": "lo-80", "LightGBM-hi-80": "hi-80",
-            "LightGBM-lo-90": "lo-90", "LightGBM-hi-90": "hi-90",
-        })
+        rename = {"LightGBM": "y_pred"}
+        for lvl in [80, 90]:
+            for side in ["lo", "hi"]:
+                old = f"LightGBM-{side}-{lvl}"
+                new = f"{side}-{lvl}"
+                if old in preds.columns:
+                    rename[old] = new
+        preds = preds.rename(columns=rename)
 
         metrics_df = evaluate_forecasts(val_df, preds, train_df)
         print_metrics_table(metrics_df, "LightGBM")

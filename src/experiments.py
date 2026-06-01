@@ -35,7 +35,7 @@ def run_seasonal_naive(train_df: pd.DataFrame,
     The simplest benchmark — any real model should beat this.
     """
     print("\n[A] Seasonal Naive (baseline)")
-    print("─" * 50)
+    print("-" * 50)
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     results = []
@@ -73,7 +73,7 @@ def run_statistical(train_df: pd.DataFrame,
     Uses the fastest/lightest configuration for portfolio purposes.
     """
     print("\n[B] Statistical (AutoARIMA + AutoETS)")
-    print("─" * 50)
+    print("-" * 50)
     try:
         from statsforecast import StatsForecast
         from statsforecast.models import AutoARIMA, AutoETS
@@ -131,7 +131,7 @@ def run_statistical(train_df: pd.DataFrame,
 def run_lgbm(train_df: pd.DataFrame,
              test_df: pd.DataFrame) -> tuple:
     print("\n[C] LightGBM (ML with lag features)")
-    print("─" * 50)
+    print("-" * 50)
     from src.train_lgbm import train as lgbm_train, save as lgbm_save
     fcst, metrics = lgbm_train(train_df, test_df, mlflow_run=True)
     lgbm_save(fcst)
@@ -147,7 +147,7 @@ def run_lgbm(train_df: pd.DataFrame,
 def run_chronos(train_df: pd.DataFrame,
                 test_df: pd.DataFrame) -> tuple:
     print("\n[D] Chronos-2 (zero-shot foundation model)")
-    print("─" * 50)
+    print("-" * 50)
     try:
         from src.train_chronos import load_chronos, predict_all
     except ImportError:
@@ -169,8 +169,8 @@ def run_ensemble(preds_lgbm: pd.DataFrame,
                  train_df: pd.DataFrame,
                  lgbm_weight: float = 0.6) -> tuple:
     """Simple weighted average: w*LightGBM + (1-w)*Chronos."""
-    print(f"\n[E] Ensemble (LightGBM×{lgbm_weight} + Chronos×{1-lgbm_weight})")
-    print("─" * 50)
+    print(f"\n[E] Ensemble (LightGBM*{lgbm_weight} + Chronos*{1-lgbm_weight})")
+    print("-" * 50)
 
     if preds_lgbm is None or preds_chronos is None:
         print("  [skip] missing component predictions")
@@ -225,7 +225,7 @@ def run_all() -> dict:
     mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     print("=" * 55)
-    print("  DEMAND FORECASTING — MODEL COMPARISON")
+    print("  DEMAND FORECASTING - MODEL COMPARISON")
     print("=" * 55)
 
     results = {}
