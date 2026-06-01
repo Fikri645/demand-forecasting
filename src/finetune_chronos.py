@@ -134,15 +134,22 @@ def finetune(train_df: pd.DataFrame, val_df: pd.DataFrame) -> Path:
     Returns path to saved fine-tuned model.
     """
     print(f"\nLoading base model: {BASE_MODEL}")
+    device_str = "cuda" if torch.cuda.is_available() else "cpu"
     pipeline = ChronosPipeline.from_pretrained(
         BASE_MODEL,
-        device_map="cuda" if torch.cuda.is_available() else "cpu",
-        torch_dtype=torch.bfloat16,
+        device_map=device_str,
+        dtype=torch.float32,   # float32 for stable gradient computation
     )
     model     = pipeline.model
     tokenizer = pipeline.tokenizer
-    device    = next(model.parameters()).device
-    print(f"  Model loaded on {device}")
+
+    # Ensure all parameters require grad and model is in training mode
+    model.train()
+    for param in model.parameters():
+        param.requires_grad_(True)
+
+    device = next(model.parameters()).device
+    print(f"  Model loaded on {device} (float32, {sum(p.numel() for p in model.parameters())/1e6:.0f}M params)")
 
     # Build datasets
     print("\nBuilding fine-tune dataset...")
@@ -212,7 +219,7 @@ def evaluate_finetuned(
     pipeline = ChronosPipeline.from_pretrained(
         str(finetuned_path),
         device_map="cuda" if torch.cuda.is_available() else "cpu",
-        torch_dtype=torch.bfloat16,
+        dtype=torch.float32,
     )
 
     print(f"Running forecast on {train_df[ID_COL].nunique()} series...")
