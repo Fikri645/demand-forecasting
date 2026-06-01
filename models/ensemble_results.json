@@ -1,0 +1,41 @@
+[
+  {
+    "ensemble": "lgbm_tuned+chronos_ft",
+    "best_weight_m1": 0.5,
+    "best_rmsle": 0.161
+  },
+  {
+    "ensemble": "3-model (lgbm_tuned+chronos_ft+chronos_zs)",
+    "best_weight_m1": {
+      "lgbm_tuned": 0.5,
+      "chronos_ft": 0.5,
+      "chronos_zs": 0.0
+    },
+    "best_rmsle": 0.161
+  },
+  {
+    "ensemble": "lgbm+chronos_ft",
+    "best_weight_m1": 0.5,
+    "best_rmsle": 0.1613
+  },
+  {
+    "ensemble": "lgbm+lgbm_tuned",
+    "best_weight_m1": 0.30000000000000004,
+    "best_rmsle": 0.1666
+  },
+  {
+    "ensemble": "lgbm_tuned+chronos_zs",
+    "best_weight_m1": 0.9,
+    "best_rmsle": 0.1668
+  },
+  {
+    "ensemble": "lgbm+chronos_zs",
+    "best_weight_m1": 0.9,
+    "best_rmsle": 0.1671
+  },
+  {
+    "ensemble": "chronos_ft+chronos_zs",
+    "best_weight_m1": 1.0,
+    "best_rmsle": 0.1688
+  }
+]

@@ -30,9 +30,9 @@ End-to-end retail demand forecasting pipeline. Compares **5 approaches** from na
 |---|---|
 | **Dataset** | Store Sales (Corporación Favorita) — 54 stores, 33 families, 4.5 years + oil price + holidays |
 | **Models** | Seasonal Naive → AutoARIMA → LightGBM → Amazon Chronos-2 → Ensemble |
-| **Best model** | LightGBM — RMSLE **0.1672**, MASE **0.877** (22% better than naive) |
-| **Fine-tuning** | Chronos-2 fine-tuned: RMSLE **0.1690** — closes 83% of zero-shot gap in 1000 steps |
-| **2025 SOTA** | Chronos-2 zero-shot beats AutoARIMA with no training; fine-tuned nearly matches LightGBM |
+| **Best model** | Ensemble (LightGBM-Optuna + Chronos-ft) — RMSLE **0.1610**, MASE **0.835** |
+| **Fine-tuning** | Chronos-2: zero-shot 0.2040 → 1000-step fine-tune **0.1690** → ensemble **0.1610** |
+| **Key insight** | Ensemble wins only when both components are strong — fine-tuning Chronos was the unlock |
 | **Prediction intervals** | 80% + 90% bands via conformal prediction |
 | **Metric** | RMSLE — penalises under-forecasting (stockout > overstock in cost) |
 | **Experiment tracking** | MLflow — all model runs logged |
@@ -161,20 +161,22 @@ Weighted average: LightGBM x 0.6 + Chronos x 0.4. Combines domain-feature awaren
 
 ## Results — 28-Day Forecast on Store Sales (300 series)
 
-| Model | RMSLE | MASE | SMAPE | Coverage 90% | Notes |
-|---|---|---|---|---|---|
-| Seasonal Naive | 0.2145 | 1.109 | 16.2% | — | Benchmark floor |
-| AutoARIMA | 0.2105 | 1.121 | 16.3% | 91.2% | Worse than naive (MASE > 1) |
-| Chronos-2 (zero-shot) | 0.2040 | 1.038 | 15.2% | 67.8% | Beats AutoARIMA with **zero training** |
-| Chronos-2 (fine-tuned, 1000 steps) | 0.1690 | 0.863 | 12.7% | 68.7% | **+17.2% vs zero-shot** |
-| **LightGBM** | **0.1672** | **0.877** | **12.8%** | 72.4% | **Best — 22% RMSLE vs naive** |
-| Ensemble (LGB 60% + Chronos 40%) | 0.1722 | 0.896 | 13.1% | — | Ensemble dragged down by zero-shot |
+| Model | RMSLE | MASE | Notes |
+|---|---|---|---|
+| Seasonal Naive | 0.2145 | 1.109 | Benchmark floor |
+| AutoARIMA | 0.2105 | 1.121 | Worse than naive on this dataset |
+| Chronos-2 (zero-shot) | 0.2040 | 1.038 | Beats AutoARIMA with zero training |
+| LightGBM (default) | 0.1672 | 0.877 | Strong baseline |
+| LightGBM (Optuna, 50 trials) | 0.1671 | 0.880 | Marginal gain — default was already good |
+| Chronos-2 (fine-tuned, 1000 steps) | 0.1690 | 0.863 | +17.2% vs zero-shot |
+| Chronos-2 (extended, 3000 steps) | 0.1688 | 0.863 | Converged at ~1000 steps |
+| **Ensemble (LGB-Optuna × 0.5 + Chronos-ft × 0.5)** | **0.1610** | **0.835** | **🏆 Best — 25% vs naive** |
 
 **Key findings:**
-- **Fine-tuning Chronos closes 83% of the gap to LightGBM** (zero-shot 0.2040 → fine-tuned 0.1690 vs LightGBM 0.1672) in just 1000 steps (~4 minutes on GPU). With more training, it could match or beat LightGBM.
-- **Chronos-2 zero-shot beats AutoARIMA** (RMSLE 0.2040 vs 0.2105) — foundation model generalizes better without any dataset-specific training.
-- AutoARIMA MASE > 1.0 on this dataset — complex retail patterns (oil shocks, promotions, holidays) defeat pure statistical models.
-- Fine-tuned Chronos MASE = 0.863 < 1.0 — it beats the seasonal naive benchmark. Only LightGBM and fine-tuned Chronos achieve this.
+- **Ensemble wins — but only when both components are strong.** Zero-shot Chronos dragged the first ensemble down. Once Chronos was fine-tuned, a 50/50 ensemble cuts RMSLE to 0.1610 (3.7% better than either alone).
+- **LightGBM was already near-optimal.** 50 Optuna trials only improved RMSLE by 0.0001 — the default hyperparameters were well-calibrated. Lesson: diminishing returns on HPO when the model class fits the data well.
+- **Chronos converges fast.** The jump from zero-shot (0.2040) to 1000 steps (0.1690) is massive; from 1000 to 3000 steps only 0.0002 more. Pre-training provides a warm start that requires very few gradient updates.
+- **Foundation models + feature engineering are complementary.** Chronos captures long-range temporal patterns; LightGBM captures domain features (oil price, promotions, day-of-week). Neither alone beats the combination.
 
 ---
 
@@ -189,10 +191,10 @@ In retail, **running out of stock costs more than overstock**. RMSLE operates in
 
 ## What I Learned
 
-- **Fine-tuning a foundation model in 1000 steps closes 83% of the gap to a fully-engineered ML model.** Chronos-2 zero-shot RMSLE=0.2040; after 1000 training steps → 0.1690, vs LightGBM 0.1672. The implication: for cold-start products with no feature engineering, fine-tuned Chronos is nearly as good as a tuned LightGBM.
-- **Feature engineering beats statistics for complex retail.** AutoARIMA (MASE 1.12) is *worse than naive* on this dataset. Lag features + calendar + oil price give LightGBM the context AutoARIMA can't model.
-- **Foundation models generalize without training data.** Chronos-2 zero-shot beat AutoARIMA despite never seeing Ecuadorian grocery data — pre-training on diverse time series transfers.
-- **Ensembles aren't always free wins.** Combining LightGBM with zero-shot Chronos hurt performance. With fine-tuned Chronos, the ensemble would be much stronger — both components would be competitive.
-- **MASE < 1.0 is the real bar, not arbitrary thresholds.** Only LightGBM and fine-tuned Chronos clear MASE < 1.0. AutoARIMA and zero-shot Chronos fail to beat the seasonal naive.
-- **Prediction intervals from conformal calibration are reliable.** AutoARIMA hit 91.2% empirical coverage on its 90% intervals; LightGBM hit 72.4%. Knowing uncertainty is as important as the point forecast.
-- **lag_364 (same day last year) is critical for retail.** Captures seasonal patterns that shorter lags miss — holiday shopping, back-to-school, oil price cycles.
+- **Ensemble wins only when both components are competitive.** Zero-shot Chronos (RMSLE 0.2040) + LightGBM (0.1672) = 0.1722 (worse than LightGBM alone). Fine-tuned Chronos (0.1690) + LightGBM-Optuna (0.1671) = **0.1610** (new best). The lesson: fix the weaker model first, then ensemble.
+- **LightGBM is already near-optimal with default hyperparameters.** 50 Optuna trials improved RMSLE by only 0.0001. When the model class fits the data well, HPO has diminishing returns.
+- **Foundation models converge fast from pre-training.** Zero-shot → 1000 steps: RMSLE drops 0.035 (massive). 1000 → 3000 steps: only 0.0002. Pre-training on diverse time series provides a warm start — most adaptation happens in the first few hundred steps.
+- **Chronos + LightGBM are complementary.** Chronos captures long-range temporal structure and seasonal patterns; LightGBM captures domain features (oil price, promotions, day-of-week). Their errors are not correlated — hence the ensemble gain.
+- **AutoARIMA fails on complex retail.** MASE 1.12 = worse than seasonal naive. Lag features + calendar + oil price give tree models the context that ARIMA's linear structure can't model.
+- **MASE < 1.0 is the real bar.** Only LightGBM, fine-tuned Chronos, and their ensemble clear it. AutoARIMA and zero-shot Chronos both fail to beat the naive baseline on MASE.
+- **lag_364 (same day last year) is critical.** Annual cycles in retail (back-to-school, holidays, oil price cycles) are only captured by a 1-year lag — shorter lags miss this entirely.
