@@ -15,9 +15,12 @@ models/chronos_finetuned/optimizer.pt
 models/chronos_finetuned/rng_state.pth
 models/chronos_finetuned/scheduler.pt
 
-# Reports (generated)
-reports/figures/*.png
+# Reports (generated) — un-ignore key portfolio figures
 reports/figures/*.html
+reports/figures/*.png
+!reports/figures/forecast_comparison.png
+!reports/figures/metrics_comparison.png
+!reports/figures/prediction_intervals.png
 
 # Python
 __pycache__/

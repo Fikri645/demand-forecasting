@@ -18,7 +18,7 @@ python_version: "3.11"
 [![HF Spaces](https://img.shields.io/badge/🤗%20HuggingFace-Space-yellow)](https://huggingface.co/spaces/fikri0o0/demand-forecasting)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-End-to-end retail demand forecasting pipeline. Compares **5 approaches** from naive baseline to Amazon Chronos-2 (2025 SOTA foundation model), with probabilistic prediction intervals, MLflow tracking, and a live Gradio demo.
+End-to-end retail demand forecasting pipeline. Compares **8 models** from naive baseline to Amazon Chronos-2 (2025 SOTA foundation model) with fine-tuning and Optuna HPO, with probabilistic prediction intervals, MLflow tracking, and a live Gradio demo.
 
 **[Live Demo →](https://huggingface.co/spaces/fikri0o0/demand-forecasting)**  |  **[GitHub →](https://github.com/Fikri645/demand-forecasting)**
 
@@ -45,12 +45,14 @@ End-to-end retail demand forecasting pipeline. Compares **5 approaches** from na
 ## Architecture
 
 ```
-Store Sales CSV (Kaggle) / M5 fallback (datasetsforecast)
+Store Sales CSV (Kaggle / Corporación Favorita)
   └─► data_loader.py    (load, fill date gaps, train/test split)
         └─► features.py  (lag, rolling, calendar, oil price, holiday features)
               ├─► train_lgbm.py    (LightGBM via mlforecast + MLflow)
-              ├─► train_chronos.py (Chronos-2 zero-shot — no training, requires GPU)
-              └─► experiments.py   (5-model comparison -> model_meta.json)
+              ├─► tune_lgbm.py     (Optuna 50-trial HPO)
+              ├─► train_chronos.py (Chronos-2 zero-shot — requires GPU)
+              ├─► finetune_chronos.py (1000-step fine-tune on Favorita)
+              └─► experiments.py   (8-model comparison -> model_meta.json)
                     └─► evaluate.py (forecast plots, metrics comparison)
                           ├─► api/main.py       (FastAPI /forecast)
                           └─► app/gradio_app.py (HF Spaces UI)
@@ -66,11 +68,7 @@ git clone https://github.com/Fikri645/demand-forecasting
 cd demand-forecasting
 pip install -r requirements-dev.txt
 
-# 2a. (Option A) Download Store Sales from Kaggle — put zip in data/raw/ then:
-python scripts/download_data.py
-
-# 2b. (Option B) Auto-download M5 via datasetsforecast (no Kaggle needed)
-#     Just run the script — it will use M5 as fallback automatically
+# 2. Download Store Sales — put the Kaggle zip in data/raw/ then:
 python scripts/download_data.py
 
 # 3. Run full experiment (5 models + MLflow logging)
@@ -91,26 +89,46 @@ Or via `make`:
 make install && make data && make experiments && make evaluate
 ```
 
+**Fine-tuning + HPO:**
+```bash
+make tune-lgbm         # Optuna 50-trial LightGBM HPO
+make finetune-chronos  # 1000-step Chronos fine-tune on Favorita (GPU required)
+make tune-ensemble     # grid-search ensemble weights
+```
+
+**Monitoring & Docker:**
+```bash
+make drift             # run data drift report (PSI-based, saves reports/drift_report.html)
+make docker-up         # spin up API + MLflow via Docker Compose
+```
+
 ---
 
 ## Project Structure
 
 ```
 demand-forecasting/
-├── data/processed/         # train.parquet, test.parquet
+├── data/processed/            # train.parquet, test.parquet
 ├── src/
-│   ├── config.py           # paths, constants
-│   ├── data_loader.py      # Store Sales (Favorita) loading + gap fill + M5 fallback
-│   ├── features.py         # lag, rolling, calendar feature engineering
-│   ├── metrics.py          # RMSE, MAE, RMSLE, MASE, coverage
-│   ├── train_lgbm.py       # LightGBM via mlforecast
-│   ├── train_chronos.py    # Amazon Chronos-2 (zero-shot)
-│   ├── experiments.py      # 5-model comparison + MLflow
-│   └── evaluate.py         # forecast + comparison plots
-├── api/main.py             # FastAPI /forecast endpoint
-├── app/gradio_app.py       # Gradio UI (HF Spaces)
-├── notebooks/01_eda.ipynb  # Exploratory Data Analysis
-├── tests/                  # pytest (metrics, features, API schemas)
+│   ├── config.py              # paths, constants
+│   ├── data_loader.py         # Store Sales (Favorita) loading + gap fill
+│   ├── features.py            # lag, rolling, calendar feature engineering
+│   ├── metrics.py             # RMSE, MAE, RMSLE, MASE, coverage
+│   ├── train_lgbm.py          # LightGBM via mlforecast
+│   ├── tune_lgbm.py           # Optuna 50-trial HPO
+│   ├── train_chronos.py       # Amazon Chronos-2 (zero-shot)
+│   ├── finetune_chronos.py    # Chronos fine-tuning (Seq2SeqTrainer)
+│   ├── tune_chronos.py        # Extended fine-tuning (3000 steps)
+│   ├── tune_ensemble.py       # Grid search over ensemble weights
+│   ├── experiments.py         # 8-model comparison + MLflow
+│   └── evaluate.py            # forecast + comparison plots
+├── api/main.py                # FastAPI /forecast endpoint
+├── app/gradio_app.py          # Gradio UI (HF Spaces)
+├── monitoring/drift_report.py # Data drift detection (PSI)
+├── notebooks/01_eda.ipynb     # Exploratory Data Analysis
+├── tests/                     # pytest (metrics, features, API schemas)
+├── Dockerfile                 # Production API container
+├── docker-compose.yml         # API + MLflow services
 ├── Makefile
 └── requirements-dev.txt
 ```
@@ -127,7 +145,6 @@ The **Store Sales - Time Series Forecasting** competition (Kaggle) uses real dat
 
 Source: [Kaggle Store Sales Competition](https://www.kaggle.com/competitions/store-sales-time-series-forecasting)
 
-> M5 (Walmart, via `datasetsforecast`) available as automatic fallback if CSV not present.
 
 ---
 
@@ -154,8 +171,8 @@ Zero-shot foundation model — no training data needed. Loads pre-trained weight
 
 **Requirements:** Chronos needs PyTorch with CUDA and sufficient virtual memory (page file >= 8GB on Windows). Run `python -m src.train_chronos` after increasing virtual memory. Code is complete and ready.
 
-### Ensemble
-Weighted average: LightGBM x 0.6 + Chronos x 0.4. Combines domain-feature awareness with temporal pattern recognition. Run `python -m src.experiments` after Chronos is available.
+### Ensemble (Best)
+Optimal weighted average: **LightGBM-Optuna × 0.5 + Chronos-ft × 0.5** (found via `tune_ensemble.py` grid search). Combines domain-feature awareness with temporal pattern recognition from foundation model pre-training.
 
 ---
 
@@ -172,6 +189,15 @@ Weighted average: LightGBM x 0.6 + Chronos x 0.4. Combines domain-feature awaren
 | Chronos-2 (extended, 3000 steps) | 0.1688 | 0.863 | Converged at ~1000 steps |
 | **Ensemble (LGB-Optuna × 0.5 + Chronos-ft × 0.5)** | **0.1610** | **0.835** | **🏆 Best — 25% vs naive** |
 
+![Forecast Comparison](reports/figures/forecast_comparison.png)
+*Left: 8-model RMSLE comparison. Right: 28-day forecast for a representative series.*
+
+![Metrics Comparison](reports/figures/metrics_comparison.png)
+*RMSLE vs MASE scatter — models above MASE=1.0 fail to beat the naive baseline.*
+
+![Prediction Intervals](reports/figures/prediction_intervals.png)
+*80% and 90% conformal prediction intervals (ensemble model).*
+
 **Key findings:**
 - **Ensemble wins — but only when both components are strong.** Zero-shot Chronos dragged the first ensemble down. Once Chronos was fine-tuned, a 50/50 ensemble cuts RMSLE to 0.1610 (3.7% better than either alone).
 - **LightGBM was already near-optimal.** 50 Optuna trials only improved RMSLE by 0.0001 — the default hyperparameters were well-calibrated. Lesson: diminishing returns on HPO when the model class fits the data well.
@@ -186,6 +212,29 @@ In retail, **running out of stock costs more than overstock**. RMSLE operates in
 1. Penalises under-forecasting more than over-forecasting
 2. Gives equal relative weight to low-volume and high-volume SKUs
 3. Aligns the metric with actual business cost structure
+
+---
+
+## Monitoring
+
+`monitoring/drift_report.py` detects distribution shift between a historical baseline and the most recent N days (default 30). It computes **Population Stability Index (PSI)** for five features:
+
+| Feature | Why it matters |
+|---|---|
+| `total_sales` | Primary target — sudden drops flag stock/demand events |
+| `mean_sales` | Per-series demand level shift |
+| `pct_zeros` | Spike in stockouts or listing removals |
+| `oil_price` | Leading indicator — oil shocks precede demand drops by 2–4 weeks |
+| `promo_rate` | Promotion cadence change affects forecasting strategy |
+
+PSI thresholds: **< 0.1 = STABLE**, **0.1–0.2 = MODERATE**, **> 0.2 = DRIFT** (retrain recommended).
+
+```bash
+make drift              # report for last 30 days
+make drift-window WINDOW=60   # custom window
+```
+
+Saves `reports/drift_report.html` with color-coded feature table.
 
 ---
 
