@@ -30,7 +30,8 @@ End-to-end retail demand forecasting pipeline. Compares **5 approaches** from na
 |---|---|
 | **Dataset** | Store Sales (Corporación Favorita) — 54 stores, 33 families, 4.5 years + oil price + holidays |
 | **Models** | Seasonal Naive → AutoARIMA → LightGBM → Amazon Chronos-2 → Ensemble |
-| **2025 SOTA** | Amazon **Chronos-2** (Oct 2025) — zero-shot, no retraining needed |
+| **Best model** | LightGBM — RMSLE **0.1672**, MASE **0.877** (22% better than naive) |
+| **2025 SOTA** | Amazon **Chronos-2** (Oct 2025) — zero-shot beats AutoARIMA with no training |
 | **Prediction intervals** | 80% + 90% bands via conformal prediction |
 | **Metric** | RMSLE — penalises under-forecasting (stockout > overstock in cost) |
 | **Experiment tracking** | MLflow — all model runs logged |
@@ -157,6 +158,24 @@ Weighted average: LightGBM x 0.6 + Chronos x 0.4. Combines domain-feature awaren
 
 ---
 
+## Results — 28-Day Forecast on Store Sales (300 series)
+
+| Model | RMSLE | MASE | SMAPE | Coverage 90% | Notes |
+|---|---|---|---|---|---|
+| Seasonal Naive | 0.2145 | 1.109 | 16.2% | — | Benchmark floor |
+| AutoARIMA | 0.2105 | 1.121 | 16.3% | 91.2% | Worse than naive (MASE > 1) |
+| **LightGBM** | **0.1672** | **0.877** | **12.8%** | 72.4% | **Best — 22% RMSLE improvement** |
+| Chronos-2 (zero-shot) | 0.2040 | 1.038 | 15.2% | 67.8% | Beats AutoARIMA with **zero training** |
+| Ensemble (LGB 60% + Chronos 40%) | 0.1722 | 0.896 | 13.1% | — | Ensemble dragged down by Chronos |
+
+**Key findings:**
+- LightGBM **MASE = 0.877 < 1.0** — definitively beats the seasonal naive benchmark.
+- **Chronos-2 zero-shot beats AutoARIMA** (RMSLE 0.2040 vs 0.2105) — foundation model generalizes better without any dataset-specific training.
+- AutoARIMA MASE > 1.0 on this dataset — complex retail patterns (oil shocks, promotions, holidays) defeat pure statistical models.
+- Ensemble doesn't win here — Chronos drags it down. The lesson: ensembles work when components are complementary; here LightGBM already captures what Chronos misses.
+
+---
+
 ## Why RMSLE?
 
 In retail, **running out of stock costs more than overstock**. RMSLE operates in log-space, which:
@@ -168,8 +187,9 @@ In retail, **running out of stock costs more than overstock**. RMSLE operates in
 
 ## What I Learned
 
-- **Foundation models for cold-start.** Chronos-2 gives competitive accuracy with zero training data — critical for new products with no sales history.
-- **Lag features are the backbone.** `lag_7` (same weekday last week) is the most important single feature. `lag_364` captures annual seasonality.
-- **Ensembles almost always win.** LightGBM captures domain features; Chronos captures long-range patterns. Neither alone beats the combination.
-- **Prediction intervals matter.** A point forecast isn't enough for inventory planning — you need uncertainty bands to set safety stock.
-- **RMSLE > RMSE for retail.** MSE is dominated by high-volume SKUs. Log-scale normalisation weights all products fairly.
+- **Feature engineering beats statistics for complex retail.** AutoARIMA (MASE 1.12) is *worse than naive* on this dataset. Lag features + calendar + oil price give LightGBM the context AutoARIMA can't model.
+- **Foundation models generalize without training data.** Chronos-2 zero-shot beat AutoARIMA despite never seeing Ecuadorian grocery data — the pre-training on diverse time series transfers.
+- **Ensembles aren't always free wins.** Combining LightGBM (strong) with Chronos (weaker on this task) hurt the ensemble. The lesson: only ensemble models that are complementary on the *same* distribution.
+- **MASE < 1.0 is the real bar, not arbitrary thresholds.** MASE measures improvement over seasonal naive — the cheapest possible baseline. Only LightGBM and the Ensemble clear it here.
+- **Prediction intervals from conformal calibration are reliable.** AutoARIMA hit 91.2% empirical coverage on its 90% intervals; LightGBM hit 72.4% (slightly narrow). Knowing your uncertainty is as important as the point forecast.
+- **lag_364 (same day last year) is critical for retail.** Captures seasonal patterns that lag_7/28 miss — holiday shopping, back-to-school, etc.

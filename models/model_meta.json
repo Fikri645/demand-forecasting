@@ -1,0 +1,34 @@
+{
+  "best_model": "LightGBM",
+  "best_rmsle": 0.1672,
+  "results": {
+    "SeasonalNaive": {
+      "rmsle": 0.2145,
+      "mase": 1.109,
+      "smape": 16.2
+    },
+    "AutoARIMA": {
+      "rmsle": 0.2105,
+      "mase": 1.121,
+      "smape": 16.3
+    },
+    "LightGBM": {
+      "rmsle": 0.1672,
+      "mase": 0.877,
+      "smape": 12.8
+    },
+    "Chronos-2": {
+      "rmsle": 0.204,
+      "mase": 1.038,
+      "smape": 15.2
+    },
+    "Ensemble": {
+      "rmsle": 0.1722,
+      "mase": 0.8961,
+      "smape": 13.0588
+    }
+  },
+  "dataset": "Store Sales (Corporacion Favorita)",
+  "n_series": 300,
+  "horizon": 28
+}
