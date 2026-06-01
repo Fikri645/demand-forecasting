@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: pip install pandas numpy scikit-learn lightgbm mlforecast window_ops pydantic pytest pytest-cov ruff
+      - name: Lint
+        run: ruff check src/ tests/ api/ app/ --ignore E501
+        continue-on-error: true
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
