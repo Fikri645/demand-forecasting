@@ -66,8 +66,9 @@ def forecast_series(
     Returns:
         dict with 'median', 'lo_90', 'hi_90' arrays of length `horizon`.
     """
+    # Chronos API: context is positional in newer versions
     forecast_samples = pipeline.predict(
-        context=context,
+        context,
         prediction_length=horizon,
         num_samples=num_samples,
     )  # shape: (1, num_samples, horizon)
