@@ -1,13 +1,9 @@
-# HuggingFace Spaces (slim — no heavy ML deps)
+# HuggingFace Spaces — slim (no torch, no statsforecast, no API server)
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
 lightgbm>=4.0
 mlforecast>=0.13
+window_ops>=0.0.12
 matplotlib>=3.9
-seaborn>=0.13
-joblib>=1.4
-fastapi>=0.115
-uvicorn[standard]>=0.32
-pydantic>=2.9
 gradio>=5.0

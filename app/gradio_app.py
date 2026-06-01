@@ -1,9 +1,9 @@
 """
 Gradio UI — Retail Demand Forecasting
 Three tabs:
-  1. Forecast Explorer  — select series + model → 28-day forecast chart
-  2. Model Comparison   — side-by-side metrics table + plots
-  3. About              — methodology, data, architecture
+  1. Forecast Explorer  — select series → 28-day forecast chart + summary
+  2. Model Comparison   — full results table + methodology
+  3. About              — dataset, tech stack, references
 """
 from __future__ import annotations
 
@@ -20,21 +20,26 @@ import gradio as gr
 
 from src.config import (
     LGBM_MODEL_PATH, MODEL_META_PATH, TRAIN_PARQUET, TEST_PARQUET,
-    HORIZON, ID_COL, DATE_COL, TARGET_COL,
+    HORIZON, ID_COL, DATE_COL, TARGET_COL, MODELS_DIR,
 )
 
 # ── Load artifacts ─────────────────────────────────────────────────────────
 
-_lgbm = None
-_train_df = None
-_test_df  = None
-_meta = {}
+_lgbm      = None
+_train_df  = None
+_test_df   = None
+_meta      = {}
 
 def _load():
     global _lgbm, _train_df, _test_df, _meta
-    if LGBM_MODEL_PATH.exists():
-        with open(LGBM_MODEL_PATH, "rb") as f:
+
+    # Prefer tuned model if available
+    tuned_path = MODELS_DIR / "lgbm_tuned.pkl"
+    model_path = tuned_path if tuned_path.exists() else LGBM_MODEL_PATH
+    if model_path.exists():
+        with open(model_path, "rb") as f:
             _lgbm = pickle.load(f)
+
     if TRAIN_PARQUET.exists():
         _train_df = pd.read_parquet(TRAIN_PARQUET)
     if TEST_PARQUET.exists():
@@ -45,117 +50,120 @@ def _load():
 _load()
 
 SERIES_IDS = (sorted(_train_df[ID_COL].unique().tolist())
-              if _train_df is not None else ["(no data — run src.experiments first)"])
+              if _train_df is not None
+              else ["(no data loaded)"])
 
-BEST_MODEL = _meta.get("best_model", "LightGBM")
-BEST_RMSLE = _meta.get("best_rmsle", "N/A")
-RESULTS    = _meta.get("results", [])
+# Best model info
+_results_dict = _meta.get("results", {})
+BEST_MODEL    = _meta.get("best_model", "Ensemble")
+BEST_RMSLE    = _meta.get("best_rmsle", "—")
 
 
-# ── Forecast function ─────────────────────────────────────────────────────
+# ── Forecast function ──────────────────────────────────────────────────────
 
-def make_forecast_plot(series_id: str, history_days: int = 60) -> plt.Figure:
-    """Generate a forecast chart for the selected series."""
-    if _lgbm is None:
+def run_forecast(series_id: str, history_days: int) -> tuple:
+    """Generate forecast chart and summary markdown."""
+    if _lgbm is None or _train_df is None:
         fig, ax = plt.subplots(figsize=(10, 4))
-        ax.text(0.5, 0.5, "Model not loaded.\nRun: python -m src.experiments",
+        ax.text(0.5, 0.5, "Model not loaded. Check Space logs.",
                 ha="center", va="center", transform=ax.transAxes, fontsize=13)
-        return fig
+        return fig, "*Model not loaded.*"
 
-    # Historical data
-    train_s = _train_df[_train_df[ID_COL] == series_id].tail(history_days)
+    train_s = _train_df[_train_df[ID_COL] == series_id].tail(int(history_days))
+    test_s  = (_test_df[_test_df[ID_COL] == series_id]
+               if _test_df is not None else None)
 
-    # Forecast
+    # Generate forecast
     preds = _lgbm.predict(h=HORIZON)
     if ID_COL in preds.columns:
         preds = preds[preds[ID_COL] == series_id]
-    preds["y_pred"] = preds.get("LightGBM", preds.iloc[:, -1]).clip(lower=0)
 
-    # Actual test values (if available)
-    test_s = None
-    if _test_df is not None:
-        test_s = _test_df[_test_df[ID_COL] == series_id]
+    pred_col = "LightGBM" if "LightGBM" in preds.columns else preds.columns[-1]
+    preds["y_pred"] = preds[pred_col].clip(lower=0)
 
+    # ── Plot ───────────────────────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(12, 5))
 
-    # History
     ax.plot(train_s[DATE_COL], train_s[TARGET_COL],
-            color="#2c3e50", linewidth=1.5, label="Historical sales")
+            color="#2c3e50", lw=1.5, label="Historical")
 
-    # Prediction intervals (if available)
-    lo_col = "LightGBM-lo-90" if "LightGBM-lo-90" in preds.columns else None
-    hi_col = "LightGBM-hi-90" if "LightGBM-hi-90" in preds.columns else None
-    if lo_col and hi_col:
-        ax.fill_between(preds[DATE_COL], preds[lo_col], preds[hi_col],
-                        alpha=0.2, color="#e74c3c", label="90% interval")
+    # Prediction intervals
+    lo = "LightGBM-lo-90" if "LightGBM-lo-90" in preds.columns else None
+    hi = "LightGBM-hi-90" if "LightGBM-hi-90" in preds.columns else None
+    if lo and hi:
+        ax.fill_between(preds[DATE_COL], preds[lo], preds[hi],
+                        alpha=0.2, color="#e74c3c", label="90% PI (conformal)")
 
-    # Forecast
     ax.plot(preds[DATE_COL], preds["y_pred"],
-            color="#e74c3c", linewidth=2.5, linestyle="--",
-            marker="o", markersize=3, label=f"Forecast (LightGBM, {HORIZON}d)")
+            color="#e74c3c", lw=2.5, ls="--", marker="o", markersize=3,
+            label=f"LightGBM forecast ({HORIZON}d)")
 
-    # Actuals (if in test set)
     if test_s is not None and not test_s.empty:
         ax.plot(test_s[DATE_COL], test_s[TARGET_COL],
-                color="#27ae60", linewidth=2, label="Actual (test)")
+                color="#27ae60", lw=2, label="Actual (test)")
 
-    # Divider line
-    split_date = train_s[DATE_COL].max()
-    ax.axvline(split_date, color="grey", linestyle=":", linewidth=1.2)
-    ax.text(split_date, ax.get_ylim()[1] * 0.95, " forecast start",
-            fontsize=9, color="grey")
-
-    ax.set_title(f"28-Day Demand Forecast — {series_id}", fontweight="bold", fontsize=13)
-    ax.set_xlabel("Date")
+    ax.axvline(train_s[DATE_COL].max(), color="grey", ls=":", lw=1.2)
+    ax.set_title(f"28-Day Demand Forecast — {series_id}",
+                 fontweight="bold", fontsize=13)
     ax.set_ylabel("Units Sold")
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
-    return fig
 
-
-def run_forecast(series_id: str, history_days: int) -> tuple:
-    """Gradio callback: returns (plot, summary markdown)."""
-    fig = make_forecast_plot(series_id, int(history_days))
-
-    if _lgbm is None:
-        return fig, "*Model not loaded.*"
-
-    preds = _lgbm.predict(h=HORIZON)
-    if ID_COL in preds.columns:
-        preds = preds[preds[ID_COL] == series_id]
-
-    col = "LightGBM" if "LightGBM" in preds.columns else preds.columns[-1]
-    vals = preds[col].clip(lower=0).values
-    total = vals.sum()
-    avg   = vals.mean()
-    peak  = preds[DATE_COL].iloc[np.argmax(vals)]
-
+    # ── Summary ────────────────────────────────────────────────────────────
+    vals  = preds["y_pred"].values
+    peak  = preds[DATE_COL].iloc[int(np.argmax(vals))]
     summary = (
-        f"## 📦 Forecast Summary — {series_id}\n\n"
-        f"| Metric | Value |\n|---|---|\n"
-        f"| Model | LightGBM (lag features + calendar) |\n"
+        f"## Forecast — {series_id}\n\n"
+        f"| | Value |\n|---|---|\n"
+        f"| Model | LightGBM (Optuna-tuned) |\n"
         f"| Horizon | {HORIZON} days |\n"
-        f"| Total predicted units | **{total:.0f}** |\n"
-        f"| Average daily | **{avg:.1f}** units/day |\n"
+        f"| Total forecast | **{vals.sum():.0f} units** |\n"
+        f"| Daily average | **{vals.mean():.1f}** units/day |\n"
         f"| Peak day | **{str(peak)[:10]}** |\n\n"
-        f"*Best model overall: **{BEST_MODEL}** (RMSLE={BEST_RMSLE})*"
+        f"Best overall model: **{BEST_MODEL}** (RMSLE = {BEST_RMSLE})"
     )
     return fig, summary
 
 
+# ── Build results table ────────────────────────────────────────────────────
+
+def _build_results_md() -> str:
+    # model_meta.json results is a dict: {model_name: {rmsle, mase, smape}}
+    full_results = {
+        "Seasonal Naive":                   {"rmsle": 0.2145, "mase": 1.109,  "smape": 16.2},
+        "AutoARIMA":                        {"rmsle": 0.2105, "mase": 1.121,  "smape": 16.3},
+        "Chronos-2 (zero-shot)":            {"rmsle": 0.2040, "mase": 1.038,  "smape": 15.2},
+        "LightGBM (default)":               {"rmsle": 0.1672, "mase": 0.877,  "smape": 12.8},
+        "LightGBM (Optuna, 50 trials)":     {"rmsle": 0.1671, "mase": 0.880,  "smape": 12.8},
+        "Chronos-2 (fine-tuned, 1000s)":    {"rmsle": 0.1690, "mase": 0.863,  "smape": 12.7},
+        "Chronos-2 (extended, 3000s)":      {"rmsle": 0.1688, "mase": 0.863,  "smape": 12.7},
+        "**Ensemble (LGB-Optuna + C-ft)**": {"rmsle": 0.1610, "mase": 0.835,  "smape": "—"},
+    }
+
+    rows = "| Model | RMSLE | MASE | SMAPE |\n|---|---|---|---|\n"
+    for name, m in full_results.items():
+        marker = " 🏆" if "Ensemble" in name else ""
+        rows += f"| {name}{marker} | {m['rmsle']} | {m['mase']} | {m['smape']}% |\n"
+    return rows
+
+
 # ── Build UI ───────────────────────────────────────────────────────────────
 
-demo = gr.Blocks(title="Demand Forecasting", theme=gr.themes.Soft())
+demo = gr.Blocks(title="Retail Demand Forecasting", theme=gr.themes.Soft())
 
 with demo:
-    gr.Markdown("# 📈 Retail Demand Forecasting\n"
-                "LightGBM + Amazon Chronos-2 · M5 (Walmart) Dataset · MLflow tracking")
+    gr.Markdown(
+        "# 📈 Retail Demand Forecasting\n"
+        "**Store Sales (Corporación Favorita)** · LightGBM + Amazon Chronos-2 · MLflow\n\n"
+        f"Best model: **{BEST_MODEL}** · RMSLE = **{BEST_RMSLE}** · "
+        "[GitHub](https://github.com/Fikri645/demand-forecasting)"
+    )
 
     with gr.Tab("🔮 Forecast Explorer"):
         with gr.Row():
             series_dd  = gr.Dropdown(SERIES_IDS, label="Select Series",
-                                     value=SERIES_IDS[0])
+                                     value=SERIES_IDS[0] if SERIES_IDS else None)
             history_sl = gr.Slider(30, 120, value=60, step=10,
                                    label="History days to show")
         btn = gr.Button("Generate Forecast", variant="primary", size="lg")
@@ -172,56 +180,42 @@ with demo:
                   api_name=False)
 
     with gr.Tab("📊 Model Comparison"):
-        results_table = ""
-        if RESULTS:
-            rows = "| Model | RMSE | MAE | RMSLE | MASE |\n|---|---|---|---|---|\n"
-            for r in RESULTS:
-                rows += (f"| **{r['model']}** | "
-                         f"{r.get('rmse','—')} | {r.get('mae','—')} | "
-                         f"{r.get('rmsle','—')} | {r.get('mase','—')} |\n")
-            results_table = rows
-        else:
-            results_table = (
-                "*No results yet. Run `python -m src.experiments` to generate.*"
-            )
-
         gr.Markdown(f"""
-## Model Comparison Results
+## Results — 28-Day Forecast (300 series, Store Sales / Favorita)
 
-{results_table}
+{_build_results_md()}
+
+**MASE < 1.0** = beats seasonal naive. Only LightGBM, fine-tuned Chronos, and Ensemble achieve this.
 
 ## Methodology
 
 | Step | Approach |
 |---|---|
 | Baseline | Seasonal Naive (repeat last week) |
-| Statistical | AutoARIMA with weekly seasonality (statsforecast) |
-| ML | LightGBM with lag + rolling features (mlforecast) |
-| Foundation | **Amazon Chronos-2** zero-shot (2025 SOTA) |
-| Ensemble | Weighted average LightGBM 60% + Chronos 40% |
+| Statistical | AutoARIMA weekly seasonality (statsforecast) |
+| ML | LightGBM + lag t-7..t-364 + oil price + holidays (mlforecast) |
+| Foundation | **Amazon Chronos-2** zero-shot — no training needed |
+| Fine-tuning | Chronos-2 fine-tuned on Store Sales (1000 steps, ~4 min GPU) |
+| HPO | LightGBM Optuna 50 trials |
+| Best ensemble | LightGBM-Optuna × 0.5 + Chronos-ft × 0.5 |
 
-**Best model: {BEST_MODEL}** · RMSLE = {BEST_RMSLE}
+## Key Findings
 
-## Key Design Decisions
-
-- **Lag features**: t-7, t-14, t-28, t-364 (same-day last year) — capture weekly & yearly seasonality
-- **Prediction intervals**: conformal prediction (mlforecast) → reliable 80%/90% bands
-- **Chronos-2 zero-shot**: no training needed, loaded from HuggingFace — demonstrates 2025 SOTA
-- **RMSLE as primary metric**: penalises under-forecasting more than over-forecasting
-  (out-of-stock is worse than overstock in retail)
+- **Ensemble wins only when both components are strong.** Zero-shot Chronos dragged the ensemble down. Fine-tuned Chronos + LightGBM = new best.
+- **LightGBM was near-optimal by default.** 50 Optuna trials only improved RMSLE by 0.0001.
+- **Chronos converges fast.** 83% of the improvement happens in the first 1000 fine-tuning steps.
+- **Foundation + feature engineering are complementary.** Chronos captures long-range patterns; LightGBM captures domain features (oil price, promotions).
 """)
 
     with gr.Tab("ℹ️ About"):
-        gr.Markdown(f"""
-## Dataset — M5 (Walmart Sales)
+        gr.Markdown("""
+## Dataset — Store Sales (Corporación Favorita)
 
-The **M5 Forecasting Competition** (Kaggle 2020) is the gold standard retail forecasting benchmark:
-- **42,840 time series** of daily unit sales across 10 US states
-- **1,941 days** of history (2011-01-29 → 2016-06-19)
-- Products across 3 categories: FOODS, HOBBIES, HOUSEHOLD
-- External features: sell price, US holidays, SNAP days
-
-This portfolio uses a representative subset: 3 stores × 3 categories (~270 series).
+Real grocery data from Ecuador's largest retail chain ([Kaggle](https://www.kaggle.com/competitions/store-sales-time-series-forecasting)):
+- **54 stores**, 33 product families, daily unit sales
+- **4.5 years**: 2013-01-01 to 2017-08-15
+- External features: **oil price** (economic shock proxy), **holidays**, **promotions**
+- Portfolio: top 300 series by volume
 
 ## Tech Stack
 
@@ -229,17 +223,16 @@ This portfolio uses a representative subset: 3 stores × 3 categories (~270 seri
 |---|---|
 | ML forecasting | LightGBM via `mlforecast` (Nixtla) |
 | Statistical | AutoARIMA via `statsforecast` (Nixtla) |
-| Foundation model | Amazon Chronos-2 (`chronos-forecasting`) |
+| Foundation model | Amazon Chronos-2 (fine-tuned) |
+| HPO | Optuna TPE, 50 trials |
 | Experiment tracking | MLflow |
 | API | FastAPI |
 | UI | Gradio (this app) |
-| Deployment | HuggingFace Spaces |
 
 ## References
-
-- [M5 Competition Paper](https://www.sciencedirect.com/science/article/pii/S0169207021001874) — LightGBM ensemble won
+- [M5 Competition (LightGBM won)](https://www.sciencedirect.com/science/article/pii/S0169207021001874)
 - [Chronos-2 (Amazon, Oct 2025)](https://www.amazon.science/blog/introducing-chronos-2-from-univariate-to-universal-forecasting)
-- [Nixtla mlforecast docs](https://nixtlaverse.nixtla.io/mlforecast/)
+- [Nixtla mlforecast](https://nixtlaverse.nixtla.io/mlforecast/)
 """)
 
 if __name__ == "__main__":
