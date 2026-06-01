@@ -140,16 +140,19 @@ def finetune(train_df: pd.DataFrame, val_df: pd.DataFrame) -> Path:
         device_map=device_str,
         dtype=torch.float32,   # float32 for stable gradient computation
     )
-    model     = pipeline.model
-    tokenizer = pipeline.tokenizer
+    chronos_model = pipeline.model
+    tokenizer     = pipeline.tokenizer
 
-    # Ensure all parameters require grad and model is in training mode
+    # Fine-tune the inner T5ForConditionalGeneration directly.
+    # ChronosModel is a wrapper that breaks the gradient graph when used with
+    # Seq2SeqTrainer. The inner .model (T5) takes (input_ids, labels) natively.
+    model = chronos_model.model  # T5ForConditionalGeneration
     model.train()
     for param in model.parameters():
         param.requires_grad_(True)
 
     device = next(model.parameters()).device
-    print(f"  Model loaded on {device} (float32, {sum(p.numel() for p in model.parameters())/1e6:.0f}M params)")
+    print(f"  Inner T5 loaded on {device} (float32, {sum(p.numel() for p in model.parameters())/1e6:.0f}M params)")
 
     # Build datasets
     print("\nBuilding fine-tune dataset...")
@@ -201,8 +204,14 @@ def finetune(train_df: pd.DataFrame, val_df: pd.DataFrame) -> Path:
           f"max {MAX_STEPS} steps)...")
     trainer.train()
 
-    # Save fine-tuned model + tokenizer
-    model.save_pretrained(str(FINETUNED_PATH))
+    # Save the fine-tuned weights.
+    # We save the inner T5 model's weights; the ChronosConfig is copied from
+    # the base checkpoint so ChronosPipeline.from_pretrained() can reload it.
+    import shutil
+    from huggingface_hub import snapshot_download
+    base_cache = snapshot_download(BASE_MODEL)          # path to cached base
+    shutil.copytree(base_cache, str(FINETUNED_PATH), dirs_exist_ok=True)
+    model.save_pretrained(str(FINETUNED_PATH))          # overwrite T5 weights
     print(f"  Saved fine-tuned model -> {FINETUNED_PATH}")
     return FINETUNED_PATH
 
